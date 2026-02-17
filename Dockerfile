@@ -1,4 +1,8 @@
-FROM mcr.microsoft.com/playwright:v1.49.0-noble
+FROM mcr.microsoft.com/playwright:v1.58.2-noble
+
+# Corriger CVE Ubuntu (dirmngr, gpg, git, libtiff6)
+USER root
+RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*
 
 ENV NODE_ENV=production \
     NPM_CONFIG_LOGLEVEL=error
