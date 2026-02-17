@@ -21,6 +21,15 @@ function getPrivateKey() {
   return readFileSync(JWT_PRIVATE_KEY_PATH, 'utf8');
 }
 
+function getOrderNumber(orderData) {
+  if (orderData.orderNumber?.trim()) return orderData.orderNumber.trim();
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = (d.getMonth() + 1).toString().padStart(2, '0');
+  const j = d.getDate().toString().padStart(2, '0');
+  return `${y}${m}${j}0001`;
+}
+
 function generateEmailServiceToken(project) {
   return jwt.sign(
     { project, permissions: ['send_email'] },
@@ -55,8 +64,10 @@ function buildInvoiceHtml(orderData) {
     : [ship.address, `${ship.postalCode || ''} ${ship.city || ''}`.trim(), ship.country || 'France']
         .filter(Boolean).join(', ') || '-';
 
+  const orderNumber = getOrderNumber(orderData);
+
   return template({
-    order_number: orderData.orderNumber || 'N/A',
+    order_number: orderNumber,
     items,
     subtotal,
     shipping_cost: shippingCost.toFixed(2),
@@ -90,10 +101,10 @@ async function htmlToPdf(html) {
 
 export async function generateAndSendInvoice(project, orderData, toEmail) {
   const toName = orderData.customerName || toEmail.split('@')[0];
+  const orderNumber = getOrderNumber(orderData);
   const html = buildInvoiceHtml(orderData);
   const pdfBuffer = await htmlToPdf(html);
   const pdfBase64 = pdfBuffer.toString('base64');
-  const orderNumber = orderData.orderNumber || 'N/A';
   const filename = `facture-${orderNumber}.pdf`;
 
   const token = generateEmailServiceToken(project);

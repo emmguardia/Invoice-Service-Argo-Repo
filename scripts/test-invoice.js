@@ -67,8 +67,13 @@ function generateOrderData() {
   const shippingCost = 5.9;
   const total = Math.round((subtotal + shippingCost) * 100) / 100;
 
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = (d.getMonth() + 1).toString().padStart(2, '0');
+  const j = d.getDate().toString().padStart(2, '0');
+  const n = (Math.floor(Math.random() * 9999) + 1).toString().padStart(4, '0');
   return {
-    orderNumber: `TEST-${Date.now().toString(36).toUpperCase()}`,
+    orderNumber: `${y}${m}${j}${n}`,
     firstName: prenom,
     lastName: nom,
     items,
