@@ -65,7 +65,7 @@ function buildInvoiceHtml(orderData) {
     shipping_address: shippingAddress,
     customer_name: orderData.customerName || 'Client',
     customer_email: orderData.customerEmail || '',
-    date: new Date().toLocaleDateString('fr-FR'),
+    date: new Date().toLocaleDateString('fr-FR', { timeZone: 'Europe/Paris' }),
   });
 }
 
