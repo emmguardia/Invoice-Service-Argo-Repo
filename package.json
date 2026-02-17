@@ -1,0 +1,24 @@
+{
+  "name": "invoice-service",
+  "version": "1.0.0",
+  "description": "Service de génération de factures PDF (Playwright + Handlebars)",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "echo 'No tests yet'",
+    "lint": "eslint src/"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "express": "^4.21.0",
+    "handlebars": "^4.7.8",
+    "jsonwebtoken": "^9.0.2",
+    "playwright": "^1.49.0"
+  },
+  "devDependencies": {
+    "eslint": "^9.0.0"
+  }
+}

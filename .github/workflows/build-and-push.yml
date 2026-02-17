@@ -1,0 +1,157 @@
+# Build and push Invoice-Service
+# main → version + digest (prod)
+
+name: Build and push to GHCR
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to build'
+        required: true
+        default: 'main'
+        type: choice
+        options:
+          - main
+
+env:
+  REGISTRY: ghcr.io
+
+permissions:
+  contents: read
+  packages: write
+  attestations: write
+  id-token: write
+
+concurrency:
+  group: build-and-push-${{ github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test & security
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify Node
+        shell: powershell
+        run: |
+          $v = node --version
+          Write-Host "Node $v"
+          if (-not ($v -match '^v(\d+)\.')) { Write-Error "Node version inconnue: $v" }
+          if ([int]$Matches[1] -lt 20) { Write-Error "Node 20 ou plus requis" }
+
+      - name: Install
+        run: npm ci
+
+      - name: Audit (moderate+)
+        run: npm audit --audit-level=moderate
+
+      - name: Test
+        run: npm test
+
+  build-and-push:
+    name: Build and push
+    needs: test
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 25
+    permissions:
+      contents: write
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set image tag
+        id: tag
+        shell: powershell
+        run: |
+          $path = "version.txt"
+          $content = (Get-Content $path -Raw).Trim()
+          if (-not ($content -match '^(\d+)\.(\d+)\.(\d+)$')) { $content = "1.0.0" }
+          $parts = $content -split '\.'
+          $major = [int]$parts[0]
+          $minor = [int]$parts[1]
+          $patch = [int]$parts[2]
+          if ($patch -lt 99) { $patch++ } else { $patch = 0; $minor++ }
+          $newVersion = "${major}.${minor}.${patch}"
+          $tag = "v${newVersion}"
+          Set-Content $path -Value $newVersion -NoNewline
+          "IMAGE_TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Append
+          echo "tag=$tag" >> $env:GITHUB_OUTPUT
+          Write-Host "Tag: $tag"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver: docker
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/invoice-service
+          tags: |
+            type=raw,value=${{ steps.tag.outputs.tag }}
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Trivy scan
+        shell: powershell
+        env:
+          TRIVY_USERNAME: ${{ github.actor }}
+          TRIVY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $img = "${{ env.REGISTRY }}/${{ github.repository_owner }}/invoice-service:${{ steps.tag.outputs.tag }}"
+          docker run --rm -e TRIVY_USERNAME -e TRIVY_PASSWORD aquasec/trivy image --exit-code 1 --severity CRITICAL,HIGH --ignore-unfixed --format table $img
+
+      - name: Pin Helm values to digest
+        shell: powershell
+        run: |
+          $tag = "${{ steps.tag.outputs.tag }}"
+          $digest = "${{ steps.build.outputs.digest }}"
+          $owner = "${{ github.repository_owner }}"
+          $reg = "${{ env.REGISTRY }}"
+          $image = if ($digest) { "${reg}/${owner}/invoice-service@${digest}" } else { "${reg}/${owner}/invoice-service:${tag}" }
+          $valuesPath = "charts/invoice-service/values.yaml"
+          $content = Get-Content $valuesPath -Raw
+          $content = $content -replace '  image: ghcr\.io/[^\r\n]+invoice-service[^\r\n]*', "  image: $image"
+          Set-Content $valuesPath -Value $content -NoNewline
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add version.txt $valuesPath
+          git diff --staged --quiet
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "Helm values already up to date, skip commit"
+          } else {
+            git pull --rebase origin ${{ github.ref_name }}
+            git commit -m "chore(helm): pin image to digest $tag [skip ci]"
+            git push
+            if ($LASTEXITCODE -ne 0) { Write-Error "git push failed"; exit 1 }
+          }
