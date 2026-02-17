@@ -119,8 +119,8 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # Pas de cache-to : l'image Playwright (~770MB) bloque l'upload GHA trop longtemps
           cache-from: type=gha
-          cache-to: type=gha,mode=max
 
       - name: Trivy scan
         shell: powershell
