@@ -11,33 +11,30 @@ Service de génération de factures PDF (Playwright + Handlebars) pour Le Clos d
 
 ## Déploiement
 
-### 1. Créer le secret `invoice-service-secrets`
+### 1. Clé Invoice (déjà générée)
+
+Les clés `jwt_invoice_private.pem` et `jwt_invoice_public.pem` sont dans `Invoice-Service-Argo-Repo/`. La clé privée est déjà dans `clos-secrets` (backend Clos).
+
+### 2. Créer le secret `invoice-service-secrets`
+
+**Option A – En local (clé depuis `Email-Service/K3s/secret.yaml`) :**
 
 ```bash
+node scripts/extract-email-key.js   # génère jwt_email_private.pem
+# Copie jwt_invoice_public.pem + jwt_email_private.pem sur le serveur, puis :
 kubectl create secret generic invoice-service-secrets -n invoice-service \
-  --from-file=jwt_private_key.pem=./jwt_private_key.pem \
-  --from-file=jwt_public_key.pem=./jwt_public_key.pem
+  --from-file=jwt_public_key.pem=./jwt_invoice_public.pem \
+  --from-file=jwt_private_key.pem=./jwt_email_private.pem
 ```
 
-**Clés requises :**
-- `jwt_private_key.pem` : même clé que le backend Clos (pour signer vers Email-Service)
-- `jwt_public_key.pem` : clé publique de la **nouvelle paire** (pour vérifier les requêtes du backend)
-
-### 2. Créer le secret Invoice pour le backend Clos
-
-Le backend signe les requêtes vers Invoice-Service avec une **nouvelle paire** JWT :
+**Option B – Sur le serveur (si clos-secrets existe déjà) :**
 
 ```bash
-openssl genrsa -out jwt_invoice_private.pem 2048
-openssl rsa -in jwt_invoice_private.pem -pubout -out jwt_invoice_public.pem
-```
-
-- `jwt_invoice_public.pem` → dans `invoice-service-secrets` (clé `jwt_public_key`)
-- Créer le secret `clos-invoice-secret` dans le namespace `clos-de-la-reine` :
-
-```bash
-kubectl create secret generic clos-invoice-secret -n clos-de-la-reine \
-  --from-file=jwt-invoice-private-key=./jwt_invoice_private.pem
+kubectl get secret clos-secrets -n clos-de-la-reine -o jsonpath='{.data.jwt-private-key}' | base64 -d > /tmp/jwt_email_private.pem
+kubectl create secret generic invoice-service-secrets -n invoice-service \
+  --from-file=jwt_public_key.pem=./jwt_invoice_public.pem \
+  --from-file=jwt_private_key.pem=/tmp/jwt_email_private.pem
+rm /tmp/jwt_email_private.pem
 ```
 
 ### 3. ArgoCD
@@ -46,7 +43,12 @@ Créer une Application ArgoCD pointant vers ce repo, path `charts/invoice-servic
 
 ### 4. ghcr-secret
 
-Copier le `ghcr-secret` depuis zenix vers le namespace `invoice-service` (comme pour clos-de-la-reine).
+Créer le namespace puis copier le secret (sur le serveur K3s) :
+
+```bash
+kubectl create namespace invoice-service
+kubectl get secret ghcr-secret -n zenix -o json | jq 'del(.metadata.namespace, .metadata.resourceVersion, .metadata.uid, .metadata.creationTimestamp, .metadata.selfLink) | .metadata.namespace = "invoice-service"' | kubectl apply -n invoice-service -f -
+```
 
 ## Structure
 

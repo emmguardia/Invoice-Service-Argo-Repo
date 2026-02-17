@@ -66,3 +66,8 @@ spec:
       - name: secrets
         secret:
           secretName: {{ .Values.service.secretName }}
+          items:
+          - key: jwt-private-key
+            path: jwt_private_key.pem
+          - key: jwt-public-key
+            path: jwt_public_key.pem

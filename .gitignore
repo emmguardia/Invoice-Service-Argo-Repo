@@ -5,4 +5,7 @@ node_modules/
 .DS_Store
 secrets/
 *.pem
+jwt_invoice_private.pem
+jwt_invoice_public.pem
+jwt_email_private.pem
 charts/invoice-service/secrets/*
