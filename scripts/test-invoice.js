@@ -49,7 +49,7 @@ function generateOrderData() {
   const prenom = random(PRENOMS);
   const nom = random(NOMS);
   const ville = random(VILLES);
-  const nbItems = randomInt(1, 4);
+  const nbItems = 1;
   const items = [];
   let subtotal = 0;
 

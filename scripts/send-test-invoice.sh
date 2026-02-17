@@ -4,8 +4,8 @@
 
 set -e
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$REPO_ROOT"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
 
 TMP_KEY=$(mktemp)
 PF_PID=""
@@ -32,7 +32,7 @@ echo "⏳ Attente que le port soit prêt (3s)..."
 sleep 3
 
 echo "📤 Envoi de la facture test..."
-INVOICE_SERVICE_URL=http://localhost:8080 JWT_INVOICE_PRIVATE_KEY_PATH="$TMP_KEY" node scripts/test-invoice.js
+INVOICE_SERVICE_URL=http://localhost:8080 JWT_INVOICE_PRIVATE_KEY_PATH="$TMP_KEY" node test-invoice.js
 
 echo ""
 echo "✅ Terminé ! Vérifie ta boîte mail (enzomonnetmata@gmail.com)"
