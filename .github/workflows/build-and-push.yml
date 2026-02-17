@@ -129,7 +129,7 @@ jobs:
           TRIVY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $img = "${{ env.REGISTRY }}/${{ github.repository_owner }}/invoice-service:${{ steps.tag.outputs.tag }}"
-          docker run --rm -e TRIVY_USERNAME -e TRIVY_PASSWORD aquasec/trivy image --exit-code 1 --severity CRITICAL,HIGH --ignore-unfixed --format table $img
+          docker run --rm -e TRIVY_USERNAME -e TRIVY_PASSWORD aquasec/trivy:0.69.1 image --exit-code 1 --severity CRITICAL,HIGH --ignore-unfixed --format table --timeout 15m $img
 
       - name: Pin Helm values to digest
         shell: powershell
