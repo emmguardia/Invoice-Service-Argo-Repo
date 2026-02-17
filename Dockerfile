@@ -4,6 +4,9 @@ FROM mcr.microsoft.com/playwright:v1.58.2-noble
 USER root
 RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*
 
+# Corriger CVE npm global (brace-expansion, tar dans /usr/lib/node_modules/npm)
+RUN npm install -g npm@latest
+
 ENV NODE_ENV=production \
     NPM_CONFIG_LOGLEVEL=error
 
