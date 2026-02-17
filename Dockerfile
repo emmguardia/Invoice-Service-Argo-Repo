@@ -1,24 +1,18 @@
 FROM mcr.microsoft.com/playwright:v1.49.0-noble
 
 ENV NODE_ENV=production \
-    NPM_CONFIG_LOGLEVEL=error \
-    NPM_CONFIG_UPDATE_NOTIFIER=false
+    NPM_CONFIG_LOGLEVEL=error
 
 WORKDIR /app
 
-RUN groupadd -r appuser 2>/dev/null || true && \
-    useradd -r -g appuser -u 1000 appuser 2>/dev/null || true
-
 COPY package.json package-lock.json* ./
 
-RUN npm ci --omit=dev --no-audit --no-fund 2>/dev/null || npm install --omit=dev --no-audit --no-fund && \
-    npx playwright install chromium && \
-    npm cache clean --force 2>/dev/null || true
+RUN npm ci --omit=dev --no-audit --no-fund 2>/dev/null || npm install --omit=dev --no-audit --no-fund
 
 COPY src/ ./src/
 COPY templates/ ./templates/
 
-RUN mkdir -p /app/secrets && chown -R 1000:1000 /app 2>/dev/null || true
+RUN mkdir -p /app/secrets && chown -R 1000:1000 /app
 
 USER 1000
 
