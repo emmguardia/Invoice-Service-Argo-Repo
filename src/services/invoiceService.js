@@ -30,24 +30,38 @@ function generateEmailServiceToken(project) {
 }
 
 function buildInvoiceHtml(orderData) {
-  const template = loadTemplate('invoice');
-  const items = (orderData.items || []).map(i =>
-    `- ${i.name} x${i.quantity} - ${i.price.toFixed(2)}€`
-  ).join('\n');
-  const shippingCost = orderData.shippingCost ?? 5.9;
-  const subtotal = (orderData.totalAmount || 0) - shippingCost;
-  const total = orderData.totalAmount || 0;
-  const orderTotal = `Sous-total: ${subtotal.toFixed(2)}€\nFrais de port: ${shippingCost.toFixed(2)}€\nTotal: ${total.toFixed(2)}€`;
+  const template = loadTemplate('clos-de-la-reine');
+  const rawItems = orderData.items || [];
+  const items = rawItems.map((i) => {
+    const price = Number(i.price) || 0;
+    const qty = Number(i.quantity) || 1;
+    const lineTotal = (price * qty).toFixed(2);
+    return {
+      name: i.name || 'Produit',
+      quantity: qty,
+      price: price.toFixed(2),
+      lineTotal,
+    };
+  });
+  const itemsSubtotal = items.reduce((sum, i) => sum + Number(i.price) * Number(i.quantity), 0);
+  const shippingCost = Number(orderData.shippingCost ?? 5.9);
+  const total = Number(orderData.totalAmount || 0);
+  const diffFrais = total - itemsSubtotal - shippingCost;
+  const fraisSupplementaires = diffFrais > 0.01 ? diffFrais : 0;
+  const subtotal = itemsSubtotal.toFixed(2);
   const ship = orderData.shippingAddress || {};
   const shippingAddress = typeof ship === 'string'
     ? ship
     : [ship.address, `${ship.postalCode || ''} ${ship.city || ''}`.trim(), ship.country || 'France']
-        .filter(Boolean).join('\n') || '-';
+        .filter(Boolean).join(', ') || '-';
 
   return template({
     order_number: orderData.orderNumber || 'N/A',
-    order_items: items,
-    order_total: orderTotal,
+    items,
+    subtotal,
+    shipping_cost: shippingCost.toFixed(2),
+    frais_supplementaires: fraisSupplementaires > 0 ? fraisSupplementaires.toFixed(2) : null,
+    total: total.toFixed(2),
     shipping_address: shippingAddress,
     customer_name: orderData.customerName || 'Client',
     customer_email: orderData.customerEmail || '',
