@@ -13,18 +13,20 @@
     "node": ">=20"
   },
   "dependencies": {
-    "@isaacs/brace-expansion": "^5.0.1",
+    "@isaacs/brace-expansion": "5.0.1",
     "express": "^4.21.0",
     "handlebars": "^4.7.8",
     "jsonwebtoken": "^9.0.2",
     "playwright": "^1.58.0",
-    "tar": "^7.5.7"
+    "tar": "7.5.9"
   },
   "devDependencies": {
     "eslint": "^9.0.0"
   },
   "overrides": {
     "cross-spawn": "^7.0.5",
-    "glob": "^10.5.0"
+    "glob": "^10.5.0",
+    "@isaacs/brace-expansion": "5.0.1",
+    "tar": "7.5.9"
   }
 }

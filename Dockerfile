@@ -12,9 +12,9 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 
 RUN npm ci --omit=dev --no-audit --no-fund 2>/dev/null || npm install --omit=dev --no-audit --no-fund
-# Supprimer les copies nested vulnérables (playwright) → Node résout vers les versions root
-RUN rm -rf node_modules/playwright/node_modules/@isaacs node_modules/playwright/node_modules/tar 2>/dev/null || true; \
-    rm -rf node_modules/playwright-core/node_modules/@isaacs node_modules/playwright-core/node_modules/tar 2>/dev/null || true
+# Supprimer TOUTES les copies nested vulnérables → Node résout vers le root
+RUN for d in $(find node_modules -path "*/node_modules/@isaacs/brace-expansion" -type d 2>/dev/null | grep -v "^node_modules/@isaacs/brace-expansion$"); do rm -rf "$d"; done; \
+    for d in $(find node_modules -path "*/node_modules/tar" -type d 2>/dev/null | grep -v "^node_modules/tar$"); do rm -rf "$d"; done
 
 COPY src/ ./src/
 COPY templates/ ./templates/
