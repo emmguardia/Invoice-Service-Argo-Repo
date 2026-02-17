@@ -12,9 +12,7 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 
 RUN npm ci --omit=dev --no-audit --no-fund 2>/dev/null || npm install --omit=dev --no-audit --no-fund
-# Forcer les versions corrigées au root
-RUN npm install @isaacs/brace-expansion@5.0.1 tar@7.5.7 --omit=dev --no-save
-# Supprimer les copies nested vulnérables (playwright) → Node résout vers le root
+# Supprimer les copies nested vulnérables (playwright) → Node résout vers les versions root
 RUN rm -rf node_modules/playwright/node_modules/@isaacs node_modules/playwright/node_modules/tar 2>/dev/null || true; \
     rm -rf node_modules/playwright-core/node_modules/@isaacs node_modules/playwright-core/node_modules/tar 2>/dev/null || true
 
