@@ -127,7 +127,7 @@ jobs:
       # NB: image base Playwright ~770MB → cache GHA volumineux mais nécessaire pour
       # éviter de re-tout-télécharger à chaque run.
       - name: Build (local — pour scan Trivy)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           load: true
@@ -147,7 +147,7 @@ jobs:
       # Étape 3 : push uniquement si scan clean
       - name: Push
         id: build
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           push: true
