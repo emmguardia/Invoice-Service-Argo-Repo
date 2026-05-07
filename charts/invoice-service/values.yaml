@@ -16,6 +16,13 @@ service:
     JWT_PRIVATE_KEY_PATH: /app/secrets/jwt_private_key.pem
     JWT_PUBLIC_KEY_PATH: /app/secrets/jwt_public_key.pem
     EMAIL_SERVICE_URL: http://email-service.email-service.svc.cluster.local:8080
+    # Mentions légales (art. R123-237 C. com.)
+    VENDOR_SIRET: "890 865 389 00021"
+    # Archivage R2 — endpoint et bucket en clair, credentials via SealedSecret
+    R2_ENDPOINT: "https://07f813a5e32eb6a6c357020105e55a83.r2.cloudflarestorage.com"
+    R2_BUCKET_NAME: "clos-invoices"
+    R2_REGION: "auto"
+    INVOICE_REQUIRE_ARCHIVE: "true"
   secretName: invoice-service-secrets
   resources:
     requests:
@@ -24,3 +31,14 @@ service:
     limits:
       cpu: "500m"
       memory: "1Gi"
+  hpa:
+    enabled: true
+    minReplicas: 1
+    maxReplicas: 5
+    cpuTarget: 70
+    memoryTarget: 80
+  networkPolicy:
+    enabled: true
+    callerNamespace: clos-de-la-reine
+    emailServiceNamespace: email-service
+    allowR2Egress: true

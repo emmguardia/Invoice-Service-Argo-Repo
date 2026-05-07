@@ -1,43 +1,45 @@
 import jwt from 'jsonwebtoken';
 import { readFileSync } from 'fs';
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
 
 const PUBLIC_KEY_PATH = process.env.JWT_PUBLIC_KEY_PATH || '/app/secrets/jwt_public_key.pem';
-const ALLOWED_PROJECTS = ['clos-de-la-reine'];
+const JWT_ISSUER = process.env.JWT_ISSUER || 'clos-de-la-reine-back';
+const JWT_AUDIENCE = process.env.JWT_AUDIENCE || undefined;
+const ALLOWED_PROJECTS = new Set(
+  (process.env.ALLOWED_PROJECTS || 'clos-de-la-reine')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+);
 
-function getPublicKey() {
+const PUBLIC_KEY = (() => {
   try {
     return readFileSync(PUBLIC_KEY_PATH, 'utf8');
-  } catch (e) {
-    throw new Error('JWT public key not found');
+  } catch {
+    throw new Error(`JWT public key introuvable: ${PUBLIC_KEY_PATH}`);
   }
-}
+})();
 
 export function verifyJWTToken(req, res, next) {
   const auth = req.headers.authorization;
   if (!auth || !auth.startsWith('Bearer ')) {
     return res.status(401).json({ error: 'Token manquant' });
   }
-  const token = auth.slice(7);
   try {
-    const decoded = jwt.verify(token, getPublicKey(), {
+    req.jwtPayload = jwt.verify(auth.slice(7), PUBLIC_KEY, {
       algorithms: ['RS256'],
-      issuer: 'clos-de-la-reine-back',
+      issuer: JWT_ISSUER,
+      ...(JWT_AUDIENCE ? { audience: JWT_AUDIENCE } : {}),
+      clockTolerance: 5,
     });
-    req.jwtPayload = decoded;
     next();
-  } catch (e) {
+  } catch {
     return res.status(401).json({ error: 'Token invalide ou expiré' });
   }
 }
 
 export function verifyProjectAccess(req, res, next) {
-  const project = req.body?.project || req.jwtPayload?.project;
-  if (!project || !ALLOWED_PROJECTS.includes(project)) {
+  const project = req.jwtPayload?.project;
+  if (!project || !ALLOWED_PROJECTS.has(project)) {
     return res.status(403).json({ error: 'Projet non autorisé' });
   }
   req.project = project;

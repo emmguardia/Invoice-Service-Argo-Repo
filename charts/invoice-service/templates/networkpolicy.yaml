@@ -1,0 +1,65 @@
+{{- if .Values.service.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: invoice-service
+  namespace: {{ include "invoice.namespace" . }}
+  labels:
+    {{- include "invoice.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app: invoice-service
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Trafic entrant uniquement depuis le namespace du backend appelant
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.service.networkPolicy.callerNamespace | quote }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.service.port }}
+  egress:
+    # DNS (kube-dns)
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # email-service (in-cluster)
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.service.networkPolicy.emailServiceNamespace | quote }}
+          podSelector:
+            matchLabels:
+              app: email-service
+      ports:
+        - protocol: TCP
+          port: 8080
+    {{- if .Values.service.networkPolicy.allowR2Egress }}
+    # Cloudflare R2 (HTTPS Internet, hors ranges privés)
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 169.254.0.0/16
+              - 127.0.0.0/8
+      ports:
+        - protocol: TCP
+          port: 443
+    {{- end }}
+{{- end }}

@@ -20,11 +20,19 @@ spec:
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
+        runAsGroup: 1000
         fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
       containers:
       - name: invoice-service
         image: {{ .Values.service.image }}
         imagePullPolicy: {{ .Values.service.imagePullPolicy }}
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
         ports:
         - containerPort: {{ .Values.service.port }}
         env:
@@ -42,12 +50,38 @@ spec:
           value: {{ .Values.service.env.JWT_PUBLIC_KEY_PATH | quote }}
         - name: EMAIL_SERVICE_URL
           value: {{ .Values.service.env.EMAIL_SERVICE_URL | quote }}
+        - name: VENDOR_SIRET
+          value: {{ .Values.service.env.VENDOR_SIRET | quote }}
+        - name: R2_ENDPOINT
+          value: {{ .Values.service.env.R2_ENDPOINT | quote }}
+        - name: R2_BUCKET_NAME
+          value: {{ .Values.service.env.R2_BUCKET_NAME | quote }}
+        - name: R2_REGION
+          value: {{ .Values.service.env.R2_REGION | quote }}
+        - name: INVOICE_REQUIRE_ARCHIVE
+          value: {{ .Values.service.env.INVOICE_REQUIRE_ARCHIVE | quote }}
+        - name: R2_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.service.secretName }}
+              key: r2-access-key-id
+              optional: true
+        - name: R2_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.service.secretName }}
+              key: r2-secret-access-key
+              optional: true
         resources:
           {{- toYaml .Values.service.resources | nindent 10 }}
         volumeMounts:
         - name: secrets
           mountPath: /app/secrets
           readOnly: true
+        - name: tmp
+          mountPath: /tmp
+        - name: home
+          mountPath: /home/pwuser
         livenessProbe:
           httpGet:
             path: /health
@@ -58,7 +92,7 @@ spec:
           failureThreshold: 3
         readinessProbe:
           httpGet:
-            path: /health
+            path: /ready
             port: {{ .Values.service.port }}
           initialDelaySeconds: 15
           periodSeconds: 5
@@ -73,3 +107,10 @@ spec:
             path: jwt_private_key.pem
           - key: jwt-public-key
             path: jwt_public_key.pem
+      - name: tmp
+        emptyDir:
+          medium: Memory
+          sizeLimit: 256Mi
+      - name: home
+        emptyDir:
+          sizeLimit: 256Mi

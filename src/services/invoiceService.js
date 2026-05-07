@@ -1,120 +1,147 @@
-import { chromium } from 'playwright';
-import Handlebars from 'handlebars';
 import { readFileSync } from 'fs';
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
 import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
+import { computeTotals, fromCents } from './money.js';
+import { resolveInvoiceNumber } from './numbering.js';
+import { getTemplate, renderPdf } from './pdf.js';
+import { archiveInvoicePdf, STORAGE_ENABLED, sha256 } from './storageService.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
-const TEMPLATES_DIR = process.env.TEMPLATES_DIR || '/app/templates';
-const EMAIL_SERVICE_URL = process.env.EMAIL_SERVICE_URL || 'http://email-service.email-service.svc.cluster.local:8080';
+const EMAIL_SERVICE_URL =
+  process.env.EMAIL_SERVICE_URL ||
+  'http://email-service.email-service.svc.cluster.local:8080';
 const JWT_PRIVATE_KEY_PATH = process.env.JWT_PRIVATE_KEY_PATH || '/app/secrets/jwt_private_key.pem';
+const EMAIL_SERVICE_TIMEOUT_MS = Number(process.env.EMAIL_SERVICE_TIMEOUT_MS || 10_000);
+const TEMPLATE_NAME = process.env.INVOICE_TEMPLATE || 'clos-de-la-reine';
+const VENDOR_SIRET = process.env.VENDOR_SIRET || 'À RENSEIGNER';
+const PAYMENT_TERMS_DAYS = Number(process.env.PAYMENT_TERMS_DAYS || 0);
+// Conformité: par défaut on exige l'archivage avant envoi (la facture "existe" légalement quand elle est archivée).
+// Mettre INVOICE_REQUIRE_ARCHIVE=false en dev pour bypasser.
+const REQUIRE_ARCHIVE = process.env.INVOICE_REQUIRE_ARCHIVE !== 'false';
 
-function loadTemplate(name) {
-  const path = join(TEMPLATES_DIR, `${name}.html`);
-  return Handlebars.compile(readFileSync(path, 'utf8'), { strict: true });
-}
+const PRIVATE_KEY = (() => {
+  try {
+    return readFileSync(JWT_PRIVATE_KEY_PATH, 'utf8');
+  } catch {
+    throw new Error(`JWT private key introuvable: ${JWT_PRIVATE_KEY_PATH}`);
+  }
+})();
 
-function getPrivateKey() {
-  return readFileSync(JWT_PRIVATE_KEY_PATH, 'utf8');
-}
-
-function getOrderNumber(orderData) {
-  if (orderData.orderNumber?.trim()) return orderData.orderNumber.trim();
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = (d.getMonth() + 1).toString().padStart(2, '0');
-  const j = d.getDate().toString().padStart(2, '0');
-  return `${y}${m}${j}0001`;
-}
-
-function generateEmailServiceToken(project) {
+function signEmailServiceToken(project) {
   return jwt.sign(
     { project, permissions: ['send_email'] },
-    getPrivateKey(),
-    { algorithm: 'RS256', issuer: 'email-service', expiresIn: '1h' }
+    PRIVATE_KEY,
+    {
+      algorithm: 'RS256',
+      issuer: 'invoice-service',
+      audience: 'email-service',
+      subject: project,
+      jwtid: crypto.randomUUID(),
+      expiresIn: '60s',
+    }
   );
 }
 
-function buildInvoiceHtml(orderData) {
-  const template = loadTemplate('clos-de-la-reine');
-  const rawItems = orderData.items || [];
-  const items = rawItems.map((i) => {
-    const price = Number(i.price) || 0;
-    const qty = Number(i.quantity) || 1;
-    const lineTotal = (price * qty).toFixed(2);
-    return {
-      name: i.name || 'Produit',
-      quantity: qty,
-      price: price.toFixed(2),
-      lineTotal,
-    };
-  });
-  const itemsSubtotal = items.reduce((sum, i) => sum + Number(i.price) * Number(i.quantity), 0);
-  const shippingCost = Number(orderData.shippingCost ?? 5.9);
-  const total = Number(orderData.totalAmount || 0);
-  const diffFrais = total - itemsSubtotal - shippingCost;
-  const fraisSupplementaires = diffFrais > 0.01 ? diffFrais : 0;
-  const subtotal = itemsSubtotal.toFixed(2);
-  const ship = orderData.shippingAddress || {};
-  const shippingAddress = typeof ship === 'string'
-    ? ship
-    : [ship.address, `${ship.postalCode || ''} ${ship.city || ''}`.trim(), ship.country || 'France']
-        .filter(Boolean).join(', ') || '-';
+function formatShippingAddress(ship) {
+  if (!ship) return '-';
+  if (typeof ship === 'string') return ship;
+  const parts = [
+    ship.address,
+    `${ship.postalCode || ''} ${ship.city || ''}`.trim(),
+    ship.country || 'France',
+  ].filter(Boolean);
+  return parts.join(', ') || '-';
+}
 
-  const orderNumber = getOrderNumber(orderData);
+function buildInvoiceHtml(orderData, orderNumber) {
+  const template = getTemplate(TEMPLATE_NAME);
+  const { lines, itemsCents, shippingCents, totalCents } = computeTotals(orderData);
+
+  const items = lines.map((l) => ({
+    name: l.name,
+    quantity: l.qty,
+    price: fromCents(l.unitCents),
+    lineTotal: fromCents(l.lineCents),
+  }));
+
+  const now = new Date();
+  const dueDate = new Date(now.getTime() + PAYMENT_TERMS_DAYS * 24 * 60 * 60 * 1000);
+  const fmtDate = (d) => d.toLocaleDateString('fr-FR', { timeZone: 'Europe/Paris' });
 
   return template({
     order_number: orderNumber,
     items,
-    subtotal,
-    shipping_cost: shippingCost.toFixed(2),
-    frais_supplementaires: fraisSupplementaires > 0 ? fraisSupplementaires.toFixed(2) : null,
-    total: total.toFixed(2),
-    shipping_address: shippingAddress,
+    subtotal: fromCents(itemsCents),
+    shipping_cost: fromCents(shippingCents),
+    total: fromCents(totalCents),
+    shipping_address: formatShippingAddress(orderData.shippingAddress),
     customer_name: orderData.customerName || 'Client',
     customer_email: orderData.customerEmail || '',
-    date: new Date().toLocaleDateString('fr-FR', { timeZone: 'Europe/Paris' }),
+    date: fmtDate(now),
+    due_date: PAYMENT_TERMS_DAYS > 0 ? fmtDate(dueDate) : 'à réception',
+    vendor_siret: VENDOR_SIRET,
   });
 }
 
-async function htmlToPdf(html) {
-  const browser = await chromium.launch({
-    headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
-  });
+async function postToEmailService(payload, token) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), EMAIL_SERVICE_TIMEOUT_MS);
   try {
-    const page = await browser.newPage();
-    await page.setContent(html, { waitUntil: 'networkidle' });
-    const pdf = await page.pdf({
-      format: 'A4',
-      printBackground: true,
-      margin: { top: '1.5cm', right: '1.5cm', bottom: '1.5cm', left: '1.5cm' },
+    const response = await fetch(`${EMAIL_SERVICE_URL}/api/v1/send`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(payload),
+      signal: ctrl.signal,
     });
-    return pdf;
+    if (!response.ok) {
+      const detail = await response.json().catch(() => ({ error: response.statusText }));
+      const err = new Error(detail.error || detail.details || 'Email-Service error');
+      err.code = 'EMAIL_SERVICE_ERROR';
+      err.status = response.status;
+      throw err;
+    }
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      const e = new Error(`Email-Service timeout (${EMAIL_SERVICE_TIMEOUT_MS}ms)`);
+      e.code = 'EMAIL_SERVICE_TIMEOUT';
+      throw e;
+    }
+    throw err;
   } finally {
-    await browser.close();
+    clearTimeout(timer);
   }
 }
 
 export async function generateAndSendInvoice(project, orderData, toEmail) {
+  const orderNumber = resolveInvoiceNumber(orderData);
   const toName = orderData.customerName || toEmail.split('@')[0];
-  const orderNumber = getOrderNumber(orderData);
-  const html = buildInvoiceHtml(orderData);
-  const pdfBuffer = await htmlToPdf(html);
-  const pdfBase64 = pdfBuffer.toString('base64');
+
+  const html = buildInvoiceHtml(orderData, orderNumber);
+  const pdfBuffer = await renderPdf(html);
   const filename = `facture-${orderNumber}.pdf`;
 
-  const token = generateEmailServiceToken(project);
-  const response = await fetch(`${EMAIL_SERVICE_URL}/api/v1/send`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${token}`,
-    },
-    body: JSON.stringify({
+  // 1) Archivage immuable AVANT envoi: on ne peut pas envoyer une facture qui n'a pas été archivée.
+  let archive = null;
+  if (REQUIRE_ARCHIVE) {
+    archive = await archiveInvoicePdf({ project, orderNumber, pdfBuffer });
+  } else if (STORAGE_ENABLED) {
+    try {
+      archive = await archiveInvoicePdf({ project, orderNumber, pdfBuffer });
+    } catch (err) {
+      console.warn('[INVOICE] archive R2 échouée (mode non-strict):', err.message);
+      archive = { sha256: sha256(pdfBuffer), key: null };
+    }
+  } else {
+    archive = { sha256: sha256(pdfBuffer), key: null };
+  }
+
+  // 2) Envoi de l'email avec hash en référence (audit/traçabilité)
+  const pdfBase64 = pdfBuffer.toString('base64');
+  const token = signEmailServiceToken(project);
+  await postToEmailService(
+    {
       template_id: 'invoice',
       to_email: toEmail,
       to_name: toName,
@@ -125,12 +152,13 @@ export async function generateAndSendInvoice(project, orderData, toEmail) {
       },
       subject: `Facture n°${orderNumber} - Le Clos de la Reine`,
       attachments: [{ filename, content: pdfBase64 }],
-    }),
-  });
+    },
+    token
+  );
 
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({ error: response.statusText }));
-    throw new Error(err.error || err.details || 'Email-Service error');
-  }
-  return { success: true };
+  return {
+    success: true,
+    orderNumber,
+    archive: { key: archive.key, sha256: archive.sha256 },
+  };
 }

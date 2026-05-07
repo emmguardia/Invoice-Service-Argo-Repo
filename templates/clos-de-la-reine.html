@@ -3,11 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <title>Facture {{ order_number }} - Le Clos de la Reine</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,600;0,700;1,400&display=swap" rel="stylesheet">
   <style>
-    body { font-family: 'Cormorant Garamond', Georgia, serif; color: #333; margin: 0; padding: 40px; line-height: 1.6; font-size: 15px; }
+    /* Pas de fonts externes (sécurité + reproductibilité offline). Fallback système. */
+    body { font-family: Georgia, "Times New Roman", serif; color: #333; margin: 0; padding: 40px; line-height: 1.6; font-size: 15px; }
     .header { display: flex; justify-content: space-between; border-bottom: 2px solid #000; padding-bottom: 20px; margin-bottom: 40px; }
     .brand h1 { margin: 0; font-size: 28px; font-weight: bold; }
     .brand p { font-size: 12px; margin: 5px 0; color: #555; }
@@ -31,7 +29,11 @@
     .total-row { display: flex; justify-content: space-between; padding: 6px 0; font-size: 14px; }
     .total-row.grand-total { border-top: 2px solid #000; margin-top: 10px; padding-top: 12px; font-weight: bold; font-size: 18px; }
 
-    .footer { margin-top: 100px; border-top: 1px solid #eee; padding-top: 20px; font-size: 11px; color: #888; text-align: center; }
+    .legal { clear: both; margin-top: 40px; font-size: 11px; color: #555; line-height: 1.5; }
+    .legal h4 { font-size: 11px; text-transform: uppercase; color: #777; margin: 12px 0 4px; }
+    .legal p { margin: 2px 0; }
+
+    .footer { margin-top: 30px; border-top: 1px solid #eee; padding-top: 20px; font-size: 11px; color: #888; text-align: center; }
     .legal-mention { font-style: italic; margin-top: 10px; }
   </style>
 </head>
@@ -44,7 +46,8 @@
     </div>
     <div class="invoice-details">
       <h2>Facture n° {{ order_number }}</h2>
-      <p>Date : {{ date }}</p>
+      <p>Date d'émission : {{ date }}</p>
+      <p>Date d'échéance : {{ due_date }}</p>
     </div>
   </div>
 
@@ -52,10 +55,10 @@
     <div class="address-box">
       <h3>Vendeur</h3>
       <p><strong>Le Clos de la Reine</strong></p>
-      <p>Joanne Romain</p>
+      <p>Joanne Romain — Entrepreneur individuel</p>
       <p>1 chemin de la Marnière</p>
-      <p>77150 Lesigny, France</p>
-      <p>SIRET : En cours</p>
+      <p>77150 Lésigny, France</p>
+      <p>SIREN/SIRET : {{ vendor_siret }}</p>
     </div>
     <div class="address-box" style="text-align: right;">
       <h3>Client</h3>
@@ -86,8 +89,8 @@
       <tr>
         <td>{{ this.name }}</td>
         <td class="text-center">{{ this.quantity }}</td>
-        <td class="text-right">{{ this.price }}€</td>
-        <td class="text-right">{{ this.lineTotal }}€</td>
+        <td class="text-right">{{ this.price }} €</td>
+        <td class="text-right">{{ this.lineTotal }} €</td>
       </tr>
       {{/each}}
     </tbody>
@@ -96,29 +99,29 @@
   <div class="totals">
     <div class="total-row">
       <span>Sous-total</span>
-      <span>{{ subtotal }}€</span>
+      <span>{{ subtotal }} €</span>
     </div>
     <div class="total-row">
       <span>Frais de port</span>
-      <span>{{ shipping_cost }}€</span>
+      <span>{{ shipping_cost }} €</span>
     </div>
-    {{#if frais_supplementaires}}
-    <div class="total-row">
-      <span>Frais supplémentaires</span>
-      <span>{{ frais_supplementaires }}€</span>
-    </div>
-    {{/if}}
     <div class="total-row grand-total">
-      <span>Total</span>
-      <span>{{ total }}€</span>
+      <span>Total à payer</span>
+      <span>{{ total }} €</span>
     </div>
   </div>
 
-  <div style="clear: both;"></div>
+  <div class="legal">
+    <h4>Conditions de paiement</h4>
+    <p>Paiement reçu par carte bancaire (Stripe) le {{ date }}.</p>
+    <p>En cas de retard de paiement, application d'une pénalité égale au taux directeur de la BCE majoré de 10 points (art. L441-10 C. com.) et d'une indemnité forfaitaire de 40 € pour frais de recouvrement (art. D441-5 C. com.).</p>
+    <p>Pas d'escompte pour paiement anticipé.</p>
+
+    <h4>Mentions fiscales</h4>
+    <p class="legal-mention">TVA non applicable, art. 293 B du CGI.</p>
+  </div>
 
   <div class="footer">
-    <p>Paiement reçu par carte bancaire (Stripe) le {{ date }}</p>
-    <p class="legal-mention">TVA non applicable, art. 293 B du CGI</p>
     <p>Le Clos de la Reine — Facture générée automatiquement. Merci pour votre confiance.</p>
   </div>
 
