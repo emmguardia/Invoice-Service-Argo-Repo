@@ -1,4 +1,4 @@
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const MAX_EMAIL = 320;
 const MAX_ITEMS = 50;
 const MAX_PRICE = 100_000;
 const MAX_QTY = 1000;
@@ -10,6 +10,31 @@ const bad = (res, details) =>
 
 function isStr(v, max) {
   return typeof v === 'string' && v.length <= max;
+}
+
+// Validation email en O(n) sans regex polynomiale (évite le ReDoS):
+// borne d'abord la longueur, puis check structurel via indexOf/charCodeAt.
+function isValidEmail(s) {
+  if (typeof s !== 'string') return false;
+  const len = s.length;
+  if (len < 3 || len > MAX_EMAIL) return false;
+
+  const at = s.indexOf('@');
+  // exactement un @, pas en début, pas en fin
+  if (at < 1 || at !== s.lastIndexOf('@') || at === len - 1) return false;
+
+  // pas de whitespace, scan une seule passe O(n)
+  for (let i = 0; i < len; i++) {
+    const c = s.charCodeAt(i);
+    // espaces & contrôles: \t \n \v \f \r ' '
+    if (c === 0x20 || (c >= 0x09 && c <= 0x0d)) return false;
+  }
+
+  // domaine doit contenir un '.' qui n'est ni juste après '@' ni en dernière position
+  const dot = s.indexOf('.', at + 2);
+  if (dot < 0 || dot === len - 1) return false;
+
+  return true;
 }
 
 function validateAddress(a) {
@@ -30,7 +55,7 @@ export function validateInvoiceBody(req, res, next) {
   if (!order_data || typeof order_data !== 'object' || Array.isArray(order_data)) {
     return bad(res, 'order_data requis (objet)');
   }
-  if (typeof to_email !== 'string' || !EMAIL_RE.test(to_email) || to_email.length > 320) {
+  if (!isValidEmail(to_email)) {
     return bad(res, 'to_email invalide');
   }
 
@@ -61,10 +86,8 @@ export function validateInvoiceBody(req, res, next) {
   if (order_data.customerName != null && !isStr(order_data.customerName, MAX_NAME)) {
     return bad(res, 'customerName invalide');
   }
-  if (order_data.customerEmail != null) {
-    if (!isStr(order_data.customerEmail, 320) || !EMAIL_RE.test(order_data.customerEmail)) {
-      return bad(res, 'customerEmail invalide');
-    }
+  if (order_data.customerEmail != null && !isValidEmail(order_data.customerEmail)) {
+    return bad(res, 'customerEmail invalide');
   }
   if (!validateAddress(order_data.shippingAddress)) {
     return bad(res, 'shippingAddress invalide');

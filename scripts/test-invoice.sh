@@ -52,7 +52,7 @@ if ! curl -s --max-time 3 "http://localhost:$LOCAL_PORT/health" | grep -q '"stat
   exit 1
 fi
 
-ORDER_NUMBER="TEST-$(date +%Y%m%d)-$(printf '%04d' $((RANDOM % 10000)))"
+ORDER_NUMBER="ZZ-TEST-$(date +%Y%m%d-%H%M%S)"
 echo "==> Envoi facture-test (orderNumber=$ORDER_NUMBER, to=$TO_EMAIL)"
 
 BODY=$(cat <<JSON
