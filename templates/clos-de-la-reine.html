@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <title>Facture {{ order_number }} - Le Clos de la Reine</title>
+  <style>
+    /* Pas de fonts externes (sécurité + reproductibilité offline). Fallback système. */
+    body { font-family: Georgia, "Times New Roman", serif; color: #333; margin: 0; padding: 40px; line-height: 1.6; font-size: 15px; }
+    .header { display: flex; justify-content: space-between; border-bottom: 2px solid #000; padding-bottom: 20px; margin-bottom: 40px; }
+    .brand h1 { margin: 0; font-size: 28px; font-weight: bold; }
+    .brand p { font-size: 12px; margin: 5px 0; color: #555; }
+    .invoice-details { text-align: right; }
+    .invoice-details h2 { margin: 0; font-size: 20px; color: #555; }
+    .invoice-details p { margin: 4px 0; font-size: 14px; }
+
+    .addresses { display: flex; justify-content: space-between; margin-bottom: 40px; }
+    .address-box h3 { font-size: 12px; text-transform: uppercase; color: #777; margin-bottom: 8px; }
+    .address-box p { margin: 0; font-size: 14px; line-height: 1.5; }
+
+    .section-title { font-size: 12px; text-transform: uppercase; color: #777; margin-bottom: 10px; margin-top: 30px; }
+
+    table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+    th { text-align: left; font-size: 12px; text-transform: uppercase; color: #777; border-bottom: 1px solid #eee; padding: 10px 0; }
+    td { padding: 15px 0; border-bottom: 1px solid #eee; font-size: 14px; }
+    .text-center { text-align: center; }
+    .text-right { text-align: right; }
+
+    .totals { float: right; width: 300px; margin-top: 20px; }
+    .total-row { display: flex; justify-content: space-between; padding: 6px 0; font-size: 14px; }
+    .total-row.grand-total { border-top: 2px solid #000; margin-top: 10px; padding-top: 12px; font-weight: bold; font-size: 18px; }
+
+    .legal { clear: both; margin-top: 40px; font-size: 11px; color: #555; line-height: 1.5; }
+    .legal h4 { font-size: 11px; text-transform: uppercase; color: #777; margin: 12px 0 4px; }
+    .legal p { margin: 2px 0; }
+
+    .footer { margin-top: 30px; border-top: 1px solid #eee; padding-top: 20px; font-size: 11px; color: #888; text-align: center; }
+    .legal-mention { font-style: italic; margin-top: 10px; }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <div class="brand">
+      <h1>Le Clos de la Reine</h1>
+      <p>Création d'accessoires pour chiens</p>
+    </div>
+    <div class="invoice-details">
+      <h2>Facture n° {{ order_number }}</h2>
+      <p>Date d'émission : {{ date }}</p>
+      <p>Date d'échéance : {{ due_date }}</p>
+    </div>
+  </div>
+
+  <div class="addresses">
+    <div class="address-box">
+      <h3>Vendeur</h3>
+      <p><strong>Le Clos de la Reine</strong></p>
+      <p>Joanne Romain — Entrepreneur individuel</p>
+      <p>1 chemin de la Marnière</p>
+      <p>77150 Lésigny, France</p>
+      <p>SIREN/SIRET : {{ vendor_siret }}</p>
+    </div>
+    <div class="address-box" style="text-align: right;">
+      <h3>Client</h3>
+      <p><strong>{{ customer_name }}</strong></p>
+      <p>{{ shipping_address }}</p>
+      {{#if customer_email}}<p>{{ customer_email }}</p>{{/if}}
+    </div>
+  </div>
+
+  <div class="section-title">Adresse de facturation</div>
+  <div class="address-box" style="margin-bottom: 30px;">
+    <p><strong>{{ customer_name }}</strong></p>
+    <p>{{ shipping_address }}</p>
+    {{#if customer_email}}<p>{{ customer_email }}</p>{{/if}}
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Désignation</th>
+        <th class="text-center">Quantité</th>
+        <th class="text-right">Prix Unitaire</th>
+        <th class="text-right">Total</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{#each items}}
+      <tr>
+        <td>{{ this.name }}</td>
+        <td class="text-center">{{ this.quantity }}</td>
+        <td class="text-right">{{ this.price }} €</td>
+        <td class="text-right">{{ this.lineTotal }} €</td>
+      </tr>
+      {{/each}}
+    </tbody>
+  </table>
+
+  <div class="totals">
+    <div class="total-row">
+      <span>Sous-total</span>
+      <span>{{ subtotal }} €</span>
+    </div>
+    <div class="total-row">
+      <span>Frais de port</span>
+      <span>{{ shipping_cost }} €</span>
+    </div>
+    <div class="total-row grand-total">
+      <span>Total à payer</span>
+      <span>{{ total }} €</span>
+    </div>
+  </div>
+
+  <div class="legal">
+    <h4>Conditions de paiement</h4>
+    <p>Paiement reçu par carte bancaire (Stripe) le {{ date }}.</p>
+    <p>En cas de retard de paiement, application d'une pénalité égale au taux directeur de la BCE majoré de 10 points (art. L441-10 C. com.) et d'une indemnité forfaitaire de 40 € pour frais de recouvrement (art. D441-5 C. com.).</p>
+    <p>Pas d'escompte pour paiement anticipé.</p>
+
+    <h4>Mentions fiscales</h4>
+    <p class="legal-mention">TVA non applicable, art. 293 B du CGI.</p>
+  </div>
+
+  <div class="footer">
+    <p>Le Clos de la Reine — Facture générée automatiquement. Merci pour votre confiance.</p>
+  </div>
+
+</body>
+</html>

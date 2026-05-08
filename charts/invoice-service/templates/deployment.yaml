@@ -1,0 +1,116 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: invoice-service
+  namespace: {{ include "invoice.namespace" . }}
+  labels:
+    {{- include "invoice.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.service.replicas }}
+  selector:
+    matchLabels:
+      app: invoice-service
+  template:
+    metadata:
+      labels:
+        app: invoice-service
+    spec:
+      imagePullSecrets:
+        {{- toYaml .Values.imagePullSecrets | nindent 8 }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: invoice-service
+        image: {{ .Values.service.image }}
+        imagePullPolicy: {{ .Values.service.imagePullPolicy }}
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+        ports:
+        - containerPort: {{ .Values.service.port }}
+        env:
+        - name: TZ
+          value: Europe/Paris
+        - name: PORT
+          value: {{ .Values.service.env.PORT | quote }}
+        - name: NODE_ENV
+          value: {{ .Values.service.env.NODE_ENV | quote }}
+        - name: TEMPLATES_DIR
+          value: {{ .Values.service.env.TEMPLATES_DIR | quote }}
+        - name: JWT_PRIVATE_KEY_PATH
+          value: {{ .Values.service.env.JWT_PRIVATE_KEY_PATH | quote }}
+        - name: JWT_PUBLIC_KEY_PATH
+          value: {{ .Values.service.env.JWT_PUBLIC_KEY_PATH | quote }}
+        - name: EMAIL_SERVICE_URL
+          value: {{ .Values.service.env.EMAIL_SERVICE_URL | quote }}
+        - name: VENDOR_SIRET
+          value: {{ .Values.service.env.VENDOR_SIRET | quote }}
+        - name: R2_ENDPOINT
+          value: {{ .Values.service.env.R2_ENDPOINT | quote }}
+        - name: R2_BUCKET_NAME
+          value: {{ .Values.service.env.R2_BUCKET_NAME | quote }}
+        - name: R2_REGION
+          value: {{ .Values.service.env.R2_REGION | quote }}
+        - name: INVOICE_REQUIRE_ARCHIVE
+          value: {{ .Values.service.env.INVOICE_REQUIRE_ARCHIVE | quote }}
+        - name: R2_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.service.secretName }}
+              key: r2-access-key-id
+              optional: true
+        - name: R2_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.service.secretName }}
+              key: r2-secret-access-key
+              optional: true
+        resources:
+          {{- toYaml .Values.service.resources | nindent 10 }}
+        volumeMounts:
+        - name: secrets
+          mountPath: /app/secrets
+          readOnly: true
+        - name: tmp
+          mountPath: /tmp
+        - name: home
+          mountPath: /home/pwuser
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: {{ .Values.service.port }}
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: {{ .Values.service.port }}
+          initialDelaySeconds: 15
+          periodSeconds: 5
+          timeoutSeconds: 5
+          failureThreshold: 5
+      volumes:
+      - name: secrets
+        secret:
+          secretName: {{ .Values.service.secretName }}
+          items:
+          - key: jwt-private-key
+            path: jwt_private_key.pem
+          - key: jwt-public-key
+            path: jwt_public_key.pem
+      - name: tmp
+        emptyDir:
+          medium: Memory
+          sizeLimit: 256Mi
+      - name: home
+        emptyDir:
+          sizeLimit: 256Mi
