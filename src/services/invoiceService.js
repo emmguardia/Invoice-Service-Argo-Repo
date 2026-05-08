@@ -27,13 +27,14 @@ const PRIVATE_KEY = (() => {
 })();
 
 function signEmailServiceToken(project) {
+  // NB: issuer='email-service' est ce que vérifie email-service côté pair publique.
+  // Inhabituel (par convention iss = signer), mais c'est l'API existante.
   return jwt.sign(
     { project, permissions: ['send_email'] },
     PRIVATE_KEY,
     {
       algorithm: 'RS256',
-      issuer: 'invoice-service',
-      audience: 'email-service',
+      issuer: 'email-service',
       subject: project,
       jwtid: crypto.randomUUID(),
       expiresIn: '60s',
