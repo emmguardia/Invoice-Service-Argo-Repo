@@ -1,4 +1,4 @@
-FROM mcr.microsoft.com/playwright:v1.58.2-noble
+FROM mcr.microsoft.com/playwright:v1.61.1-noble
 
 # Corriger CVE Ubuntu (dirmngr, gpg, git, libtiff6)
 USER root
