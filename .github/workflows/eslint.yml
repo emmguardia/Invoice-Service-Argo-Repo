@@ -1,10 +1,20 @@
 name: ESLint
 
+# Analyse statique avec remontée dans l'onglet Security via SARIF.
+#
+# Le lint bloquant, lui, est dans build-and-push.yml (`pnpm lint`) : c'est lui
+# qui empêche un déploiement. Ce workflow-ci sert au rapport et aux annotations
+# de PR, d'où le `|| true`.
+#
+# Node 24 et non 26 : aligné sur le Node de l'image Playwright qui sert de
+# runtime à ce service.
+
 on:
   push:
     branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
+  workflow_dispatch:
 
 jobs:
   eslint:
@@ -17,33 +27,42 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.4
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: '20'
-          cache: 'npm'
+          node-version: '24'
+          cache: 'pnpm'
 
       - name: Install Dependencies
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
+      # Le formateur SARIF est installé à la volée plutôt que d'alourdir les
+      # devDependencies du projet pour un usage exclusivement CI.
       - name: Install SARIF Formatter
-        run: npm install @microsoft/eslint-formatter-sarif@3.1.0
+        run: pnpm add -D @microsoft/eslint-formatter-sarif@3.1.0
 
+      # Le SARIF vide est écrit d'abord : si eslint plante avant d'avoir produit
+      # son rapport, l'upload a quand même un fichier valide à envoyer au lieu
+      # de faire échouer le job sur un fichier manquant.
       - name: Run ESLint
         env:
           SARIF_ESLINT_IGNORE_SUPPRESSED: "true"
         run: |
           echo '{"version":"2.1.0","$schema":"https://json.schemastore.org/sarif-2.1.0.json","runs":[{"tool":{"driver":{"name":"ESLint","rules":[]}},"results":[]}]}' > eslint-results.sarif
-          npx eslint src/ \
+          pnpm exec eslint src/ \
             --format @microsoft/eslint-formatter-sarif \
             --output-file eslint-results.sarif || true
 
       - name: Upload analysis results to GitHub
         uses: github/codeql-action/upload-sarif@v4
-        # Skip sur les PRs Dependabot — token restreint sans accès security-events
-        if: always() && github.actor != 'dependabot[bot]'
+        if: always()
         with:
           sarif_file: ./eslint-results.sarif
           wait-for-processing: true

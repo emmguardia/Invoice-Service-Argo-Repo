@@ -1,7 +1,33 @@
 # Build and push Invoice-Service: main → version + digest (prod)
 # ArgoCD: App Prod = branche main + namespace invoice-service
 #
-# Runners GitHub (ubuntu) : illimités pour les repos publics
+# Service mono-conteneur : un seul package.json et un seul Dockerfile à la racine.
+#
+# ── NODE 24, PAS 26 ──────────────────────────────────────────────────────────
+# Contrairement aux autres repos, la CI tourne ici en Node 24 : c'est la version
+# embarquée par mcr.microsoft.com/playwright:v1.58.2-noble, qui sert de runtime.
+# Tester en 26 ce qui s'exécute en 24 reproduirait exactement le décalage que la
+# migration a corrigé ailleurs.
+#
+# ── COUPLAGE PLAYWRIGHT ──────────────────────────────────────────────────────
+# Le paquet npm `playwright` est épinglé en 1.58.2 EXACT dans package.json pour
+# correspondre aux navigateurs de l'image. Les révisions de navigateurs sont
+# liées à la version du paquet : bouger l'un sans l'autre casse la génération de
+# PDF. Toute montée de version doit donc modifier package.json ET le FROM du
+# Dockerfile ensemble.
+#
+# ── AUTRES CORRECTIONS ───────────────────────────────────────────────────────
+# 1. L'image scannée est exactement l'image poussée (build unique + docker tag,
+#    au lieu d'un second `docker build` non garanti identique).
+# 2. Le pin de digest est vérifié avant ET après le sed : un sed muet laissait
+#    le job passer au vert sans rien déployer.
+# 3. npm -> pnpm avec minimum-release-age=1440 (.npmrc).
+# 4. `pnpm audit --prod` : l'audit ne bloque plus sur des devDependencies.
+# 5. Le lint devient bloquant. Il était cassé et personne ne le voyait : un
+#    override `ajv@8` forçait une version incompatible avec @eslint/eslintrc,
+#    qui exige l'API d'ajv 6. L'override a été retiré — ajv ne venait que
+#    d'eslint, il était totalement absent de l'arbre de production.
+# 6. cancel-in-progress: false et push git avec retry.
 
 name: Build and push to GHCR
 
@@ -25,17 +51,18 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  TRIVY_IMAGE: aquasec/trivy:0.69.3
+  TRIVY_IMAGE: aquasec/trivy:0.73.0
+  PNPM_VERSION: 10.33.4
+  # Aligné sur le Node de l'image Playwright, pas sur les autres repos.
+  NODE_VERSION: '24'
 
 permissions:
   contents: read
   packages: write
-  attestations: write
-  id-token: write
 
 concurrency:
   group: build-and-push-${{ github.ref_name }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   test:
@@ -48,48 +75,75 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: '20'
-          cache: 'npm'
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
 
       - name: Install
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
-      - name: Audit (high+)
-        run: npm audit --audit-level=high
+      - name: Audit (prod, high+)
+        run: pnpm audit --prod --audit-level high
 
-      - name: Test (if present)
-        run: npm test --if-present
+      - name: Lint
+        run: pnpm lint
+
+      # Garde-fou sur le couplage image/paquet : si l'un des deux bouge sans
+      # l'autre, la génération de PDF casse silencieusement en production.
+      - name: Vérifier que playwright est aligné sur l'image Playwright
+        run: |
+          set -euo pipefail
+          PKG=$(node -p "require('./package.json').dependencies.playwright")
+          IMG=$(grep -oE 'playwright:v[0-9]+\.[0-9]+\.[0-9]+' Dockerfile | head -1 | sed 's/playwright:v//')
+          echo "package.json : $PKG"
+          echo "Dockerfile   : $IMG"
+          if [ "$PKG" != "$IMG" ]; then
+            echo "::error::Désalignement Playwright : package.json déclare '${PKG}' et le Dockerfile utilise l'image v${IMG}. Les révisions de navigateurs sont liées à la version du paquet — les deux doivent bouger ensemble."
+            exit 1
+          fi
+          echo "Alignés."
+
+      # ATTENTION : le script `test` est `echo 'No tests yet'` — il ne teste
+      # rien et passe toujours. Cette étape est décorative tant qu'aucun vrai
+      # test n'est écrit.
+      - name: Test
+        run: pnpm run --if-present test
 
   build-and-push:
     name: Build and push
     needs: test
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     permissions:
       contents: write
       packages: write
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Bump version (prod)
         id: tag
         run: |
+          set -euo pipefail
           CONTENT=$(cat version.txt | tr -d '\r\n ')
           MAJOR=$(echo "$CONTENT" | cut -d. -f1)
           MINOR=$(echo "$CONTENT" | cut -d. -f2)
           PATCH=$(echo "$CONTENT" | cut -d. -f3)
           if ! [[ "$MAJOR" =~ ^[0-9]+$ ]] || ! [[ "$MINOR" =~ ^[0-9]+$ ]] || ! [[ "$PATCH" =~ ^[0-9]+$ ]]; then
-            echo "version.txt invalide: $CONTENT (attendu X.Y.Z)"
+            echo "::error::version.txt invalide: $CONTENT (attendu X.Y.Z)"
             exit 1
           fi
           if [ "$PATCH" -lt 99 ]; then
@@ -101,88 +155,146 @@ jobs:
           NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
           echo "$NEW_VERSION" > version.txt
           TAG="v${NEW_VERSION}"
-          echo "IMAGE_TAG=$TAG" >> $GITHUB_ENV
-          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "Version: $CONTENT → $NEW_VERSION (tag: $TAG)"
 
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Extract metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/invoice-service
           tags: |
             type=raw,value=${{ steps.tag.outputs.tag }}
 
-      # Étape 1 : build local pour le scan Trivy (pas de push)
-      # NB: image base Playwright ~770MB → cache GHA volumineux mais nécessaire pour
-      # éviter de re-tout-télécharger à chaque run.
-      - name: Build (local — pour scan Trivy)
-        uses: docker/build-push-action@v6
+      # Build UNIQUE, chargé dans le démon Docker local. Aucun push ici.
+      # C'est ce binaire précis qui sera scanné puis publié.
+      - name: Build (local)
+        uses: docker/build-push-action@v7
         with:
           context: .
           load: true
           push: false
-          tags: scan-invoice:latest
+          tags: invoice-service:candidate
+          labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           pull: true
 
-      # Étape 2 : scan AVANT push — image vulnérable ne part jamais dans GHCR
+      # L'image embarque des navigateurs headless : on vérifie qu'elle sait
+      # encore produire un PDF avant de la publier. C'est la seule chose qui
+      # compte pour ce service, et aucun test unitaire ne le couvre.
+      - name: Vérifier la génération de PDF dans l'image
+        run: |
+          docker run --rm --entrypoint node invoice-service:candidate -e "
+            import('playwright').then(async ({chromium}) => {
+              const b = await chromium.launch();
+              const p = await b.newPage();
+              await p.setContent('<h1>smoke test</h1>');
+              const pdf = await p.pdf({ format: 'A4' });
+              if (!pdf || pdf.length < 500) throw new Error('PDF vide ou tronqué');
+              console.log('PDF généré :', pdf.length, 'octets');
+              await b.close();
+            }).catch(e => { console.error('Échec Playwright :', e.message); process.exit(1); });
+          "
+
       - name: Trivy scan (avant push)
         run: |
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
-            ${{ env.TRIVY_IMAGE }} image --exit-code 1 --severity CRITICAL,HIGH --ignore-unfixed --format table --timeout 15m \
-            scan-invoice:latest
+            ${{ env.TRIVY_IMAGE }} image --exit-code 1 --severity CRITICAL,HIGH --ignore-unfixed --format table --timeout 20m \
+            invoice-service:candidate
 
-      # Étape 3 : push uniquement si scan clean
       - name: Push
-        id: build
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          pull: true
-
-      # Pin digest dans values.yaml → ArgoCD sync automatique
-      - name: Pin Helm values to image digest
+        id: push
+        env:
+          META_TAGS: ${{ steps.meta.outputs.tags }}
         run: |
-          TAG="${{ steps.tag.outputs.tag }}"
-          DIGEST="${{ steps.build.outputs.digest }}"
-          OWNER="${{ github.repository_owner }}"
-          REG="${{ env.REGISTRY }}"
+          set -euo pipefail
+          TARGET=$(printf '%s\n' "$META_TAGS" | head -1)
+          docker tag invoice-service:candidate "$TARGET"
+          PUSH_OUT=$(docker push "$TARGET" | tee /dev/stderr)
+          DIGEST=$(docker buildx imagetools inspect "$TARGET" --format '{{.Manifest.Digest}}' 2>/dev/null || true)
+          if [ -z "$DIGEST" ]; then
+            DIGEST=$(printf '%s\n' "$PUSH_OUT" | grep -oE 'sha256:[0-9a-f]{64}' | tail -1 || true)
+          fi
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+          echo "Publié : $TARGET (digest: ${DIGEST:-introuvable})"
 
-          if [ -n "$DIGEST" ]; then
+      # ── Pin digest dans values.yaml → ArgoCD sync automatique ────────────────
+      - name: Pin Helm values to image digest
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+          BRANCH: ${{ github.ref_name }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+          OWNER: ${{ github.repository_owner }}
+          REG: ${{ env.REGISTRY }}
+        run: |
+          set -euo pipefail
+          VALUES_PATH="charts/invoice-service/values.yaml"
+
+          if [ -n "${DIGEST:-}" ]; then
             IMAGE="${REG}/${OWNER}/invoice-service@${DIGEST}"
           else
             IMAGE="${REG}/${OWNER}/invoice-service:${TAG}"
+            echo "::warning::Digest introuvable, pin sur le tag ${TAG} (déploiement OK mais non immuable)."
           fi
 
-          VALUES_PATH="charts/invoice-service/values.yaml"
-
-          sed -i "s|  image: ghcr.io/.*invoice-service.*|  image: ${IMAGE}|" "$VALUES_PATH"
+          # Garde-fou contre le déploiement fantôme : un sed muet passait au vert
+          # sans rien changer.
+          if ! grep -qE "^[[:space:]]+image:[[:space:]]*ghcr\.io/.*invoice-service[@:]" "$VALUES_PATH"; then
+            echo "::error::Aucune ligne 'image:' pour invoice-service dans ${VALUES_PATH}. Le pin de digest aurait échoué en silence."
+            exit 1
+          fi
+          sed -i -E "s|^([[:space:]]+)image:[[:space:]]*ghcr\.io/.*invoice-service[@:].*|\1image: ${IMAGE}|" "$VALUES_PATH"
+          if ! grep -qF "image: ${IMAGE}" "$VALUES_PATH"; then
+            echo "::error::Le remplacement n'a pas pris dans ${VALUES_PATH}."
+            exit 1
+          fi
+          echo "  invoice-service → ${IMAGE}"
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-
           git add version.txt "$VALUES_PATH"
 
           if git diff --staged --quiet; then
-            echo "Helm values already up to date, skip commit"
+            echo "::warning::Rien à commiter alors que le pin a réussi — values.yaml pointait déjà sur ce digest."
           else
-            git commit -m "chore(helm): pin image to digest $TAG [skip ci]"
-            git pull --rebase origin ${{ github.ref_name }}
-            git push origin ${{ github.ref_name }}
+            git commit -m "chore(helm): pin image to digest ${TAG} [skip ci]"
+
+            pushed=false
+            for attempt in 1 2 3; do
+              if git push origin "HEAD:${BRANCH}"; then
+                pushed=true
+                break
+              fi
+              echo "::warning::Push refusé (tentative ${attempt}/3), rebase sur origin/${BRANCH}…"
+              git fetch origin "$BRANCH"
+              if ! git rebase "origin/${BRANCH}"; then
+                git rebase --abort || true
+                echo "::error::Conflit de rebase sur ${BRANCH}, intervention manuelle requise."
+                exit 1
+              fi
+              sleep $((attempt * 3))
+            done
+            if [ "$pushed" != "true" ]; then
+              echo "::error::Impossible de pousser le pin de digest après 3 tentatives."
+              exit 1
+            fi
           fi
+
+          {
+            echo "### Déploiement ${TAG}"
+            echo "- Image : \`${IMAGE}\`"
+            echo ""
+            echo "Génération de PDF vérifiée et image scannée par Trivy avant publication."
+            echo "ArgoCD synchronise le cluster dans les minutes qui suivent."
+          } >> "$GITHUB_STEP_SUMMARY"

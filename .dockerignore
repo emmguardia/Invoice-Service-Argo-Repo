@@ -1,0 +1,28 @@
+# Ce fichier n'existait pas : tout le dépôt, node_modules compris, était envoyé
+# au démon Docker comme contexte de build à chaque construction.
+node_modules
+.pnpm-store
+
+.git
+.gitignore
+.gitattributes
+.github
+.claude
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+
+*.md
+SECURITY.md
+charts
+argocd
+scripts
+version.txt
+eslint.config.js
+
+.env
+.env.*
+*.log
+**/secrets/
+**/*.pem
