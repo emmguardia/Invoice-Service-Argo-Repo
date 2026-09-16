@@ -98,7 +98,8 @@ async function postToEmailService(payload, token) {
     });
     if (!response.ok) {
       const detail = await response.json().catch(() => ({ error: response.statusText }));
-      const err = new Error(detail.error || detail.details || 'Email-Service error');
+      const reasons = Array.isArray(detail.details) ? detail.details.join(' | ') : detail.details;
+      const err = new Error([detail.error, reasons].filter(Boolean).join(' — ') || 'Email-Service error');
       err.code = 'EMAIL_SERVICE_ERROR';
       err.status = response.status;
       throw err;
@@ -152,7 +153,7 @@ export async function generateAndSendInvoice(project, orderData, toEmail) {
         customer_name: toName,
       },
       subject: `Facture n°${orderNumber} - Le Clos de la Reine`,
-      attachments: [{ filename, content: pdfBase64 }],
+      attachments: [{ filename, content: pdfBase64, contentType: 'application/pdf' }],
     },
     token
   );
